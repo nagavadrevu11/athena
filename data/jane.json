@@ -1,0 +1,9 @@
+{
+  "name": "Jane Doe",
+  "employer": "ACME Corporation",
+  "stated_income": 85000,
+  "employment_type": "Salaried",
+  "loan_amount": 350000,
+  "loan_type": "Conventional",
+  "application_date": "2025-03-20"
+}

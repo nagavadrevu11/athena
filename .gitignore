@@ -1,0 +1,20 @@
+echo "
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+.DS_Store
+.streamlit/secrets.toml
+*.pem
+*.key
+.env.local
+.env.*
+credentials.json
+token.json
+*_key.*
+*.log
+.idea/
+" > .gitignore
