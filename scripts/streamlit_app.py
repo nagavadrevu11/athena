@@ -84,10 +84,6 @@ if "current_analysis" not in st.session_state:
 if "applications_list" not in st.session_state:
     st.session_state.applications_list = None
 
-# Initialize application statuses
-if "application_statuses" not in st.session_state:
-    st.session_state.application_statuses = {}
-
 # Create tabs for different sections
 analysis_tab, chat_history_tab = st.tabs(["Current Analysis", "Chat History"])
 
@@ -95,60 +91,9 @@ analysis_tab, chat_history_tab = st.tabs(["Current Analysis", "Chat History"])
 with analysis_tab:
     # Show the current analysis content or applications list
     if st.session_state.current_analysis:
-        folder_name = st.session_state.current_analysis["folder_name"]
-        
-        # Status selection in the sidebar
-        st.sidebar.markdown("### Application Status")
-        
-        # Get current status or default to "Submitted"
-        current_status = st.session_state.application_statuses.get(folder_name, "Submitted")
-        
-        # Status selection widget
-        new_status = st.sidebar.selectbox(
-            "Select status:",
-            ["Submitted", "Approved", "Conditional Approval", "Decline", "Escalate"],
-            index=["Submitted", "Approved", "Conditional Approval", "Decline", "Escalate"].index(current_status)
-        )
-        
-        # Update status when changed
-        if new_status != current_status:
-            st.session_state.application_statuses[folder_name] = new_status
-            # Here you would also update the status in Supabase if needed
-            try:
-                # Example of updating status in a metadata file
-                # This is a placeholder - implement according to your data structure
-                # supabase.storage.from_(supabase_bucket).update_metadata(f"{folder_name}/metadata.json", {"status": new_status})
-                st.sidebar.success(f"Status updated to: {new_status}")
-            except Exception as e:
-                st.sidebar.error(f"Failed to update status: {str(e)}")
-        
-        # Display status with appropriate color
-        status_colors = {
-            "Submitted": "blue",
-            "Approved": "green",
-            "Conditional Approval": "orange",
-            "Decline": "red",
-            "Escalate": "purple"
-        }
-        
-        # Display a colored status badge
-        st.markdown(f"""
-        <div style='
-            display: inline-block;
-            padding: 0.2em 0.6em;
-            border-radius: 0.5em;
-            font-weight: bold;
-            background-color: {status_colors.get(new_status, "gray")};
-            color: white;
-            margin-bottom: 1em;'>
-            {new_status}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Display the current analysis
-        st.subheader(f"Analysis for: {folder_name}")
+        # Display the current analysis here
+        st.subheader(f"Analysis for: {st.session_state.current_analysis['folder_name']}")
         # The render_evaluation function will display the analysis content here
-        
     elif st.session_state.applications_list:
         # Display the applications list
         st.subheader("Available Applications")
@@ -179,10 +124,7 @@ if user_input:
                 if response:
                     items_list = []
                     for item in response:
-                        # Get status if available
-                        status = st.session_state.application_statuses.get(item['name'], "")
-                        status_badge = f" [{status}]" if status else ""
-                        items_list.append(f"- {item['name']}{status_badge}")
+                        items_list.append(f"- {item['name']}")
                     
                     # Create formatted response
                     formatted_list = "\n".join(items_list)
@@ -286,15 +228,11 @@ if user_input:
                     with st.spinner("Running AI analysis..."):
                         result = run_assistant(paystub_data, borrower_data)
                     
-                    # Store the current analysis
+                    # Store the current analysis for potential email
                     st.session_state.current_analysis = {
                         "folder_name": name_to_analyze,
                         "result": result
                     }
-                    
-                    # If no status exists for this application, set it to "Submitted"
-                    if name_to_analyze not in st.session_state.application_statuses:
-                        st.session_state.application_statuses[name_to_analyze] = "Submitted"
                     
                     # Switch to the analysis tab and render the evaluation
                     with analysis_tab:
