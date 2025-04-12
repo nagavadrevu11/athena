@@ -5,13 +5,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 import json
 from scripts.evaluate_income import run_assistant
-import webbrowser
-import urllib.parse
+from streamlit_renderer import render_evaluation
 from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client
 import io
-import base64
 
 # Load environment variables from .env file
 load_dotenv()
@@ -57,7 +55,7 @@ if not os.getenv("OPENAI_API_KEY"):
            ```
         """)
 else:
-    st.sidebar.success(f"✅ API Key loaded from: {api_key_source}")
+    st.sidebar.success(f"✅ Welcome, are you ready to review loans? ")
 
 # Check Supabase credentials
 if not supabase_url or not supabase_key or not supabase_bucket:
@@ -72,46 +70,100 @@ if not supabase_url or not supabase_key or not supabase_bucket:
     ```
     """)
 else:
-    st.sidebar.success("✅ Supabase configuration loaded")
+    pass
 
 st.title("🧾 AI Underwriter Assistant")
 
-
-# Initialize chat history and email state
+# Initialize chat history and state
 if "messages" not in st.session_state:
     st.session_state.messages = []
     
 if "current_analysis" not in st.session_state:
     st.session_state.current_analysis = None
 
+if "applications_list" not in st.session_state:
+    st.session_state.applications_list = None
+
+# Initialize application statuses
+if "application_statuses" not in st.session_state:
+    st.session_state.application_statuses = {}
+
+# Create tabs for different sections
+analysis_tab, chat_history_tab = st.tabs(["Current Analysis", "Chat History"])
+
+# Analysis content will go in the first tab
+with analysis_tab:
+    # Show the current analysis content or applications list
+    if st.session_state.current_analysis:
+        folder_name = st.session_state.current_analysis["folder_name"]
+        
+        # Status selection in the sidebar
+        st.sidebar.markdown("### Application Status")
+        
+        # Get current status or default to "Submitted"
+        current_status = st.session_state.application_statuses.get(folder_name, "Submitted")
+        
+        # Status selection widget
+        new_status = st.sidebar.selectbox(
+            "Select status:",
+            ["Submitted", "Approved", "Conditional Approval", "Decline", "Escalate"],
+            index=["Submitted", "Approved", "Conditional Approval", "Decline", "Escalate"].index(current_status)
+        )
+        
+        # Update status when changed
+        if new_status != current_status:
+            st.session_state.application_statuses[folder_name] = new_status
+            # Here you would also update the status in Supabase if needed
+            try:
+                # Example of updating status in a metadata file
+                # This is a placeholder - implement according to your data structure
+                # supabase.storage.from_(supabase_bucket).update_metadata(f"{folder_name}/metadata.json", {"status": new_status})
+                st.sidebar.success(f"Status updated to: {new_status}")
+            except Exception as e:
+                st.sidebar.error(f"Failed to update status: {str(e)}")
+        
+        # Display status with appropriate color
+        status_colors = {
+            "Submitted": "blue",
+            "Approved": "green",
+            "Conditional Approval": "orange",
+            "Decline": "red",
+            "Escalate": "purple"
+        }
+        
+        # Display a colored status badge
+        st.markdown(f"""
+        <div style='
+            display: inline-block;
+            padding: 0.2em 0.6em;
+            border-radius: 0.5em;
+            font-weight: bold;
+            background-color: {status_colors.get(new_status, "gray")};
+            color: white;
+            margin-bottom: 1em;'>
+            {new_status}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Display the current analysis
+        st.subheader(f"Analysis for: {folder_name}")
+        # The render_evaluation function will display the analysis content here
+        
+    elif st.session_state.applications_list:
+        # Display the applications list
+        st.subheader("Available Applications")
+        st.markdown(st.session_state.applications_list)
+    else:
+        st.info("No current analysis. Use the chat below to analyze an application.")
+
 # Chat input
 user_input = st.chat_input("Ask about available applications...")
 
-# Email functionality
+# Simple clear button in sidebar
 if st.session_state.current_analysis:
-    folder_name = st.session_state.current_analysis["folder_name"]
-    analysis_result = st.session_state.current_analysis["result"]
-    
-    st.sidebar.markdown("### Send Results via Email")
-    email_to = st.sidebar.text_input("Recipient Email:", key="email_to")
-    email_subject = st.sidebar.text_input("Subject:", value=f"Application Analysis: {folder_name}", key="email_subject")
-    
-    if st.sidebar.button("Send Email"):
-        # Prepare the email body with the analysis results
-        email_body = f"Analysis results for {folder_name}:\n\n"
-        email_body += json.dumps(analysis_result, indent=2)
-        
-        # Create a mailto link
-        mailto_link = f"mailto:{email_to}?subject={urllib.parse.quote(email_subject)}&body={urllib.parse.quote(email_body)}"
-        
-        # Open the default email client
-        webbrowser.open(mailto_link)
-        
-        st.sidebar.success("Email client opened!")
-        
     if st.sidebar.button("Clear Current Analysis"):
         st.session_state.current_analysis = None
-        st.experimental_rerun()
+        st.rerun()
 
 if user_input:
     # Add user message to chat
@@ -124,23 +176,42 @@ if user_input:
             with st.spinner("Fetching applications..."):
                 response = supabase.storage.from_(supabase_bucket).list()
                 
-                # Don't make assumptions about the folder structure
-                # Just show the raw files/folders
                 if response:
                     items_list = []
                     for item in response:
-                        items_list.append(f"- {item['name']}")
+                        # Get status if available
+                        status = st.session_state.application_statuses.get(item['name'], "")
+                        status_badge = f" [{status}]" if status else ""
+                        items_list.append(f"- {item['name']}{status_badge}")
                     
-                    response = "📋 Here are the available items in storage:\n\n" + "\n".join(items_list)
-                    response += "\n\nTo analyze, type 'analyze' followed by the name (e.g., 'analyze Applicant Name')"
+                    # Create formatted response
+                    formatted_list = "\n".join(items_list)
+                    response_text = f"📋 Here are the list of applications to review for today:\n\n{formatted_list}"
+                    response_text += "\n\nTo analyze, type 'analyze' followed by the name (e.g., 'analyze Naga')"
+                    
+                    # Clear any current analysis and set applications list
+                    st.session_state.current_analysis = None
+                    st.session_state.applications_list = response_text
+                    
+                    # For chat history
+                    response = response_text
                 else:
                     response = "❌ No items found in Supabase storage."
+                    st.session_state.applications_list = "No applications found."
+                    
+                # Force refresh to show in current analysis tab
+                st.rerun()
+                
         except Exception as e:
             response = f"❌ Error accessing Supabase storage: {str(e)}"
+            st.session_state.applications_list = None
     
     elif user_input.lower().startswith("analyze"):
         # Extract name from command without assuming folder structure
         name_to_analyze = user_input.lower().replace("analyze", "").strip()
+        
+        # Clear applications list when analyzing
+        st.session_state.applications_list = None
         
         with st.spinner(f"Analyzing {name_to_analyze}..."):
             try:
@@ -179,6 +250,8 @@ if user_input:
                 pdf_files = [item['name'] for item in file_list if item['name'].endswith('.pdf')]
                 
                 paystub_text = ""
+                document_contents = []  # Store document contents for rendering
+                
                 for pdf_file in pdf_files:
                     try:
                         # Download the PDF file - adjust path as needed
@@ -194,7 +267,16 @@ if user_input:
                         # Read the PDF content
                         from PyPDF2 import PdfReader
                         reader = PdfReader(io.BytesIO(pdf_content))
-                        paystub_text += "\\n".join(page.extract_text() or "" for page in reader.pages)
+                        
+                        # Extract text for analysis
+                        doc_text = "\\n".join(page.extract_text() or "" for page in reader.pages)
+                        paystub_text += doc_text
+                        
+                        # Store document content for rendering
+                        document_contents.append({
+                            "name": pdf_file,
+                            "content": doc_text
+                        })
                     except Exception as e:
                         paystub_text += f"\\n[Error reading {pdf_file}: {e}]"
 
@@ -203,15 +285,23 @@ if user_input:
                 try:
                     with st.spinner("Running AI analysis..."):
                         result = run_assistant(paystub_data, borrower_data)
-                    response = f"📊 Analysis for {name_to_analyze}:\n```json\n{json.dumps(result, indent=2)}\n```"
                     
-                    # Store the current analysis for potential email
+                    # Store the current analysis
                     st.session_state.current_analysis = {
                         "folder_name": name_to_analyze,
                         "result": result
                     }
                     
-                    response += "\n\n✉️ Analysis complete! Use the sidebar to send these results via email."
+                    # If no status exists for this application, set it to "Submitted"
+                    if name_to_analyze not in st.session_state.application_statuses:
+                        st.session_state.application_statuses[name_to_analyze] = "Submitted"
+                    
+                    # Switch to the analysis tab and render the evaluation
+                    with analysis_tab:
+                        render_evaluation(result, borrower_data, document_contents)
+                    
+                    # Still provide text response for chat history
+                    response = f"✅ Analysis complete for {name_to_analyze}! View results in the Current Analysis tab."
                     
                 except Exception as e:
                     response = f"❌ Error analyzing {name_to_analyze}: {str(e)}"
@@ -221,13 +311,15 @@ if user_input:
     else:
         response = """👋 Hello! Here are the commands you can use:
 - 'show applications' to see available files
-- 'analyze item_name' to analyze a specific application
-
-Tip: Use the "Storage Settings" section to check your Supabase connection."""
+- 'analyze Application' to analyze a specific application
+"""
 
     st.session_state.messages.append({"role": "assistant", "content": response})
 
-# Display chat history
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# Display chat history in the second tab
+with chat_history_tab:
+    st.subheader("Previous Conversations")
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
