@@ -3,6 +3,19 @@ import os
 import json
 from datetime import datetime
 from PyPDF2 import PdfReader
+import dotenv
+from supabase import create_client
+import io
+
+# Load environment variables
+dotenv.load_dotenv()
+
+# Initialize Supabase client
+supabase_url = os.environ.get("SUPABASE_URL")
+supabase_key = os.environ.get("SUPABASE_KEY")
+supabase_bucket = os.environ.get("SUPABASE_BUCKET")
+
+supabase = create_client(supabase_url, supabase_key)
 
 st.set_page_config(page_title="Borrower Intake", layout="centered")
 st.title("📥 Borrower Income Submission")
@@ -26,30 +39,41 @@ if submitted:
     elif len(uploaded_files) > 5:
         st.error("You may upload up to 5 documents only.")
     else:
-        # Create folder under /data/<name>/ and save metadata + files
-        folder_name = name.lower().replace(" ", "_")
-        # Get the root directory (parent of scripts)
-        ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        # Update folder path to be from root
-        folder_path = os.path.join(ROOT_DIR, "data", folder_name)
-        os.makedirs(folder_path, exist_ok=True)
-
-        # Save metadata
-        metadata = {
-            "name": name,
-            "employer": employer,
-            "stated_income": stated_income,
-            "loan_amount": loan_amount,
-            "loan_type": loan_type,
-            "submitted_at": datetime.now().isoformat()
-        }
-        with open(os.path.join(folder_path, "metadata.json"), "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        # Save uploaded PDFs
-        for i, file in enumerate(uploaded_files):
-            file_path = os.path.join(folder_path, f"document_{i+1}.pdf")
-            with open(file_path, "wb") as out:
-                out.write(file.read())
-
-        st.success(f"Thank you, {name}! Your information and documents have been submitted.")
+        try:
+            # Create a folder path in Supabase storage
+            folder_name = name.lower().replace(" ", "_")
+            
+            # Prepare metadata
+            metadata = {
+                "name": name,
+                "employer": employer,
+                "stated_income": stated_income,
+                "loan_amount": loan_amount,
+                "loan_type": loan_type,
+                "submitted_at": datetime.now().isoformat()
+            }
+            
+            # Upload metadata.json to Supabase
+            metadata_path = f"{folder_name}/metadata.json"
+            metadata_bytes = json.dumps(metadata, indent=2).encode('utf-8')
+            supabase.storage.from_(supabase_bucket).upload(
+                metadata_path,
+                metadata_bytes,
+                {"content-type": "application/json"}
+            )
+            
+            # Upload PDF files to Supabase
+            for i, file in enumerate(uploaded_files):
+                file_path = f"{folder_name}/document_{i+1}.pdf"
+                file_bytes = file.read()
+                supabase.storage.from_(supabase_bucket).upload(
+                    file_path,
+                    file_bytes,
+                    {"content-type": "application/pdf"}
+                )
+            
+            st.success(f"Thank you, {name}! Your information and documents have been uploaded to Supabase.")
+            
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            st.info("Please check your Supabase credentials in the .env file.")
